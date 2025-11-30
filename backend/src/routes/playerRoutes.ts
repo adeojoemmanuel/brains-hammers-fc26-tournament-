@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { sendRegistrationEmail } from '../services/emailService';
 import { generatePlayoffs } from '../utils/matchGenerator';
 import { generateUniqueCode } from '../utils/codeGenerator';
+import { generateKnockoutTournament } from '../utils/tournamentGenerator';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -13,12 +14,29 @@ router.post('/register', async (req, res) => {
         const { firstName, lastName, email, address, league, club } = req.body;
 
         // Check if email already exists
-        const existingPlayer = await prisma.player.findUnique({
+        const existingPlayerByEmail = await prisma.player.findUnique({
             where: { email },
         });
 
-        if (existingPlayer) {
+        if (existingPlayerByEmail) {
             return res.status(400).json({ error: 'Email already registered' });
+        }
+
+        // Check if club is already registered by another player (case-insensitive)
+        const clubTrimmed = club.trim();
+        const allPlayers = await prisma.player.findMany({
+            select: { club: true },
+        });
+
+        // Check if any existing player has the same club (case-insensitive comparison)
+        const clubAlreadyTaken = allPlayers.some(player => 
+            player.club && player.club.trim().toLowerCase() === clubTrimmed.toLowerCase()
+        );
+
+        if (clubAlreadyTaken) {
+            return res.status(400).json({ 
+                error: `The club "${club}" has already been registered by another player. Each club can only be registered once.` 
+            });
         }
 
         // Generate unique code
@@ -42,6 +60,35 @@ router.post('/register', async (req, res) => {
         res.status(201).json({ message: 'Registration successful', player });
     } catch (error) {
         console.error('Registration error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Get all registered clubs
+router.get('/registered-clubs', async (req, res) => {
+    try {
+        const players = await prisma.player.findMany({
+            select: {
+                club: true,
+            },
+            where: {
+                club: {
+                    not: null,
+                },
+            },
+        });
+
+        // Extract unique clubs (normalized to lowercase for consistency)
+        const registeredClubs = [...new Set(
+            players
+                .map(p => p.club?.trim())
+                .filter(c => c && c !== '')
+                .map(c => c!)
+        )];
+        
+        res.json({ registeredClubs });
+    } catch (error) {
+        console.error('Error fetching registered clubs:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -87,32 +134,31 @@ router.get('/playoffs', async (req, res) => {
 });
 
 // Get team pairings (grouped by club, avoiding duplicates)
+// Only uses fully registered players (with all required fields including code)
 router.get('/team-pairings', async (req, res) => {
     try {
-        // Fetch only registered players with complete data
+        // Fetch all players from database
         const allPlayers = await prisma.player.findMany({
             orderBy: { createdAt: 'desc' },
         });
 
-        // Filter to only include players with all required registration fields
+        // STRICT FILTER: Only include players with ALL required registration fields
+        // A registered player must have: firstName, lastName, email, address, league, club, and code
         const registeredPlayers = allPlayers.filter(player => {
-            return (
-                player.firstName &&
-                player.firstName.trim() !== '' &&
-                player.lastName &&
-                player.lastName.trim() !== '' &&
-                player.email &&
-                player.email.trim() !== '' &&
-                player.address &&
-                player.address.trim() !== '' &&
-                player.league &&
-                player.league.trim() !== '' &&
-                player.club &&
-                player.club.trim() !== '' &&
-                player.code &&
-                player.code.trim() !== ''
-            );
+            const hasFirstName = player.firstName && player.firstName.trim() !== '';
+            const hasLastName = player.lastName && player.lastName.trim() !== '';
+            const hasEmail = player.email && player.email.trim() !== '';
+            const hasAddress = player.address && player.address.trim() !== '';
+            const hasLeague = player.league && player.league.trim() !== '';
+            const hasClub = player.club && player.club.trim() !== '';
+            const hasCode = player.code && player.code.trim() !== '';
+            
+            // All fields must be present and non-empty
+            return hasFirstName && hasLastName && hasEmail && hasAddress && hasLeague && hasClub && hasCode;
         });
+
+        // Log for debugging
+        console.log(`Total players: ${allPlayers.length}, Registered players: ${registeredPlayers.length}`);
 
         // Group players by club - ensure each player is only added to their own club
         const teamsMap = new Map<string, Array<{ id: number; firstName: string; lastName: string; league: string; club: string }>>();
@@ -172,164 +218,50 @@ router.get('/team-pairings', async (req, res) => {
                        team.players.every(p => p.club === team.club);
             });
 
-        // Generate round-robin tournament schedule (each team plays every other team exactly once)
-        // Organize matches into rounds/matchdays like professional football leagues
-        
+        // Generate knockout tournament (each team plays once per stage, winners advance)
         if (teams.length < 2) {
-            return res.json({ rounds: [], pairings: [], total: 0 });
+            return res.json({ 
+                rounds: [], 
+                pairings: [], 
+                total: 0,
+                registeredPlayersCount: registeredPlayers.length,
+                totalPlayersCount: allPlayers.length,
+                teamsCount: teams.length
+            });
         }
 
-        // Create all unique pairings (each team plays every other team once)
-        const allPairings: Array<{
-            team1: { club: string; players: Array<{ id: number; firstName: string; lastName: string; league: string; club: string }>; league: string };
-            team2: { club: string; players: Array<{ id: number; firstName: string; lastName: string; league: string; club: string }>; league: string };
-        }> = [];
+        // Generate knockout tournament bracket
+        const tournamentResult = generateKnockoutTournament(teams);
 
-        // Generate all unique pairings without duplicates
-        for (let i = 0; i < teams.length; i++) {
-            for (let j = i + 1; j < teams.length; j++) {
-                const team1 = teams[i];
-                const team2 = teams[j];
-                
-                // Only create pairings for teams with registered players
-                if (team1.players.length > 0 && 
-                    team2.players.length > 0 &&
-                    team1.club.trim() !== '' &&
-                    team2.club.trim() !== '' &&
-                    team1.club !== team2.club) {
-                    
-                    // Create deep copies of teams to avoid reference sharing
-                    const team1Copy = {
-                        club: team1.club,
-                        players: team1.players.map(p => ({
-                            id: p.id,
-                            firstName: p.firstName,
-                            lastName: p.lastName,
-                            league: p.league,
-                            club: p.club,
-                        })),
-                        league: team1.league,
-                    };
-                    
-                    const team2Copy = {
-                        club: team2.club,
-                        players: team2.players.map(p => ({
-                            id: p.id,
-                            firstName: p.firstName,
-                            lastName: p.lastName,
-                            league: p.league,
-                            club: p.club,
-                        })),
-                        league: team2.league,
-                    };
-                    
-                    allPairings.push({ team1: team1Copy, team2: team2Copy });
-                }
-            }
-        }
-
-        // Organize pairings into rounds using round-robin algorithm (circle method)
-        // Each team plays every other team exactly once, organized into matchdays
-        const rounds: Array<{
-            round: number;
-            matchday: string;
-            matches: Array<{
-                team1: { club: string; players: Array<{ id: number; firstName: string; lastName: string; league: string; club: string }>; league: string };
-                team2: { club: string; players: Array<{ id: number; firstName: string; lastName: string; league: string; club: string }>; league: string };
-            }>;
-        }> = [];
-
-        const numTeams = teams.length;
-        
-        if (numTeams < 2) {
-            return res.json({ rounds: [], pairings: [], total: 0 });
-        }
-
-        // Create a map for quick pairing lookup
-        const pairingMap = new Map<string, {
-            team1: { club: string; players: Array<{ id: number; firstName: string; lastName: string; league: string; club: string }>; league: string };
-            team2: { club: string; players: Array<{ id: number; firstName: string; lastName: string; league: string; club: string }>; league: string };
-        }>();
-        
-        allPairings.forEach(pairing => {
-            const key = [pairing.team1.club, pairing.team2.club].sort().join('|');
-            pairingMap.set(key, pairing);
-        });
-
-        // Round-robin algorithm: For n teams, we need n-1 rounds (if even) or n rounds (if odd)
-        const numRounds = numTeams % 2 === 0 ? numTeams - 1 : numTeams;
-        const matchesPerRound = Math.floor(numTeams / 2);
-        
-        // Create team indices array for scheduling (circle method)
-        const teamIndices = teams.map((_, idx) => idx);
-        
-        // Generate rounds using circle method (Berger pairing)
-        for (let round = 0; round < numRounds; round++) {
-            const roundMatches: Array<{
-                team1: { club: string; players: Array<{ id: number; firstName: string; lastName: string; league: string; club: string }>; league: string };
-                team2: { club: string; players: Array<{ id: number; firstName: string; lastName: string; league: string; club: string }>; league: string };
-            }> = [];
-            
-            // Circle method: Pair teams
-            // For even number of teams: pair team[0] with team[n-1], team[1] with team[n-2], etc.
-            // For odd number of teams: one team gets a bye (we'll skip team[0] in this case)
-            const isEven = numTeams % 2 === 0;
-            const startIdx = isEven ? 0 : 1;
-            
-            for (let i = 0; i < matchesPerRound; i++) {
-                const idx1 = teamIndices[startIdx + i];
-                const idx2 = teamIndices[numTeams - 1 - i];
-                
-                // Skip if indices are invalid
-                if (idx1 >= teams.length || idx2 >= teams.length || idx1 === idx2) {
-                    continue;
-                }
-                
-                const team1 = teams[idx1];
-                const team2 = teams[idx2];
-                
-                // Find the pairing for these two teams
-                const pairKey = [team1.club, team2.club].sort().join('|');
-                const pairing = pairingMap.get(pairKey);
-                
-                if (pairing) {
-                    roundMatches.push(pairing);
-                }
-            }
-            
-            // Rotate teams for next round (circle method)
-            // Keep first team fixed (or skip for odd), rotate the rest clockwise
-            if (isEven) {
-                // For even: rotate all except first
-                const last = teamIndices.pop();
-                if (last !== undefined) {
-                    teamIndices.splice(1, 0, last);
-                }
-            } else {
-                // For odd: rotate all teams
-                const last = teamIndices.pop();
-                if (last !== undefined) {
-                    teamIndices.splice(0, 0, last);
-                }
-            }
-            
-            if (roundMatches.length > 0) {
-                rounds.push({
-                    round: round + 1,
-                    matchday: `Matchday ${round + 1}`,
-                    matches: roundMatches,
-                });
-            }
-        }
+        // Convert tournament stages to the expected format
+        const rounds = tournamentResult.stages.map(stage => ({
+            round: stage.stage,
+            matchday: stage.stageName,
+            matches: stage.matches.map(match => ({
+                team1: match.team1,
+                team2: match.team2 || {
+                    club: 'Bye',
+                    players: [],
+                    league: ''
+                },
+                matchId: match.matchId,
+                isBye: match.team2 === null
+            }))
+        }));
 
         // Flatten all pairings for backward compatibility
-        const flatPairings = rounds.flatMap(r => r.matches);
+        const flatPairings = rounds.flatMap(r => r.matches.filter(m => !m.isBye));
 
         res.json({ 
             rounds: rounds,
             pairings: flatPairings, // Keep for backward compatibility
-            total: flatPairings.length,
-            totalRounds: rounds.length
+            total: tournamentResult.totalMatches,
+            totalRounds: tournamentResult.totalStages,
+            registeredPlayersCount: tournamentResult.registeredPlayersCount,
+            totalPlayersCount: allPlayers.length,
+            teamsCount: tournamentResult.teamsCount,
+            tournamentType: 'knockout',
+            message: `Generated knockout tournament with ${tournamentResult.totalMatches} matches across ${tournamentResult.totalStages} stages using ${tournamentResult.registeredPlayersCount} registered players from ${tournamentResult.teamsCount} teams`
         });
     } catch (error) {
         console.error('Error fetching team pairings:', error);

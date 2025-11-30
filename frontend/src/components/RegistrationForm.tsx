@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import leaguesData from '../data/leagues.json';
 import { Link } from 'react-router-dom';
 
@@ -14,15 +14,44 @@ const RegistrationForm: React.FC = () => {
         club: '',
     });
     const [clubs, setClubs] = useState<string[]>([]);
+    const [registeredClubs, setRegisteredClubs] = useState<string[]>([]);
     const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
     const [errorMessage, setErrorMessage] = useState('');
     const [registrationCode, setRegistrationCode] = useState<string>('');
+    const [loadingClubs, setLoadingClubs] = useState(false);
+
+    // Fetch registered clubs
+    const fetchRegisteredClubs = async () => {
+        try {
+            setLoadingClubs(true);
+            const response = await fetch('http://localhost:3000/api/registered-clubs');
+            if (response.ok) {
+                const data = await response.json();
+                setRegisteredClubs(data.registeredClubs || []);
+            }
+        } catch (error) {
+            console.error('Error fetching registered clubs:', error);
+        } finally {
+            setLoadingClubs(false);
+        }
+    };
+
+    // Fetch registered clubs on component mount
+    useEffect(() => {
+        fetchRegisteredClubs();
+    }, []);
 
     const handleLeagueChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         const selectedLeague = e.target.value;
         setFormData({ ...formData, league: selectedLeague, club: '' });
         if (selectedLeague) {
-            setClubs((leaguesData as any)[selectedLeague] || []);
+            const allClubs = (leaguesData as any)[selectedLeague] || [];
+            // Filter out already registered clubs (case-insensitive comparison)
+            const registeredClubsLower = registeredClubs.map(c => c.toLowerCase());
+            const availableClubs = allClubs.filter((club: string) => 
+                !registeredClubsLower.includes(club.trim().toLowerCase())
+            );
+            setClubs(availableClubs);
         } else {
             setClubs([]);
         }
@@ -52,6 +81,9 @@ const RegistrationForm: React.FC = () => {
             const data = await response.json();
             setRegistrationCode(data.player.code);
             setStatus('success');
+            
+            // Refresh registered clubs list after successful registration
+            await fetchRegisteredClubs();
         } catch (error: any) {
             setStatus('error');
             setErrorMessage(error.message);
@@ -211,20 +243,42 @@ const RegistrationForm: React.FC = () => {
                             <select
                                 name="club"
                                 required
-                                disabled={!formData.league}
+                                disabled={!formData.league || loadingClubs}
                                 value={formData.club}
                                 onChange={handleChange}
                                 className={`w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 backdrop-blur-sm appearance-none ${
-                                    !formData.league ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                                    !formData.league || loadingClubs ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
                                 }`}
                             >
                                 <option value="" className="bg-slate-800">
-                                    {formData.league ? 'Select a Club' : 'Select League First'}
+                                    {loadingClubs 
+                                        ? 'Loading available clubs...' 
+                                        : formData.league 
+                                            ? clubs.length > 0 
+                                                ? 'Select a Club' 
+                                                : 'No available clubs (all registered)'
+                                            : 'Select League First'}
                                 </option>
                                 {clubs.map(c => (
                                     <option key={c} value={c} className="bg-slate-800">{c}</option>
                                 ))}
                             </select>
+                            {formData.league && (
+                                <p className="mt-2 text-xs text-white/60 flex items-start">
+                                    <svg className="w-4 h-4 mr-1.5 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    <span>Note: Any club not found in the dropdown has already been taken by another player. Each club can only be registered once.</span>
+                                </p>
+                            )}
+                            {formData.league && clubs.length === 0 && !loadingClubs && (
+                                <p className="mt-2 text-sm text-yellow-400/80 flex items-center">
+                                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    All clubs in this league have been registered. Please select a different league.
+                                </p>
+                            )}
                         </div>
                     </div>
 

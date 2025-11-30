@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 
 interface Player {
     id: number;
@@ -20,13 +20,13 @@ interface Team {
 
 interface Pairing {
     team1: Team;
-    team2: Team;
+    team2: Team | null;
 }
 
 interface Round {
     round: number;
     matchday: string;
-    matches: Pairing[];
+    matches: (Pairing & { matchId?: string; isBye?: boolean })[];
 }
 
 const AdminController: React.FC = () => {
@@ -38,6 +38,9 @@ const AdminController: React.FC = () => {
     const [totalPages, setTotalPages] = useState(1);
     const [loading, setLoading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [generating, setGenerating] = useState(false);
+    const [generateMessage, setGenerateMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+    const justGeneratedRef = useRef(false);
 
     const fetchPlayers = useCallback(async () => {
         setLoading(true);
@@ -66,11 +69,87 @@ const AdminController: React.FC = () => {
         }
     }, []);
 
+    const generateLeagueTable = useCallback(async () => {
+        setGenerating(true);
+        setGenerateMessage(null);
+        setLoading(true);
+        
+        try {
+            // Generate the league table by calling team-pairings endpoint
+            // This endpoint automatically filters for only registered players
+            const response = await fetch('http://localhost:3000/api/team-pairings');
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (data.rounds && data.rounds.length > 0) {
+                // Update the rounds state with the generated matches
+                setRounds(data.rounds);
+                
+                // Mark that we just generated, so useEffect won't fetch again
+                justGeneratedRef.current = true;
+                
+                // Switch to matches tab to display the generated league table
+                setActiveTab('matches');
+                
+                // Clear any search query
+                setSearchQuery('');
+                
+                // Show success message with details
+                const registeredCount = data.registeredPlayersCount || 0;
+                const teamsCount = data.teamsCount || 0;
+                setGenerateMessage({
+                    type: 'success',
+                    text: `Knockout tournament generated successfully! ${data.total || 0} matches across ${data.totalRounds || 0} stages using ${registeredCount} registered players from ${teamsCount} teams. Winners advance to the next stage.`
+                });
+                
+                // Clear message after 7 seconds
+                setTimeout(() => setGenerateMessage(null), 7000);
+                
+                // Reset the ref after a short delay
+                setTimeout(() => {
+                    justGeneratedRef.current = false;
+                }, 100);
+            } else {
+                // Check if we have enough registered players
+                const playersResponse = await fetch('http://localhost:3000/api/players?page=1&limit=1000');
+                const playersData = await playersResponse.json();
+                
+                if (!playersData.players || playersData.players.length < 2) {
+                    setGenerateMessage({
+                        type: 'error',
+                        text: 'Need at least 2 registered players to generate league table. Please register more players first.'
+                    });
+                } else {
+                    setGenerateMessage({
+                        type: 'error',
+                        text: 'No matches could be generated. Please ensure at least 2 players have complete registration data (firstName, lastName, email, address, league, club, and code).'
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Error generating league table:', error);
+            setGenerateMessage({
+                type: 'error',
+                text: 'Failed to generate league table. Please check your connection and try again.'
+            });
+        } finally {
+            setGenerating(false);
+            setLoading(false);
+        }
+    }, []);
+
     useEffect(() => {
         if (activeTab === 'players') {
             fetchPlayers();
-        } else {
-            fetchPairings();
+        } else if (activeTab === 'matches') {
+            // Only fetch if we didn't just generate the league table
+            if (!justGeneratedRef.current) {
+                fetchPairings();
+            }
         }
     }, [activeTab, fetchPlayers, fetchPairings]);
 
@@ -98,17 +177,17 @@ const AdminController: React.FC = () => {
         return rounds.map(round => {
             const filteredMatches = round.matches.filter(pairing => {
                 const team1Match = pairing.team1.club.toLowerCase().includes(query);
-                const team2Match = pairing.team2.club.toLowerCase().includes(query);
+                const team2Match = pairing.team2?.club.toLowerCase().includes(query) || false;
                 
                 const team1PlayersMatch = pairing.team1.players.some(p => 
                     `${p.firstName} ${p.lastName}`.toLowerCase().includes(query)
                 );
-                const team2PlayersMatch = pairing.team2.players.some(p => 
+                const team2PlayersMatch = pairing.team2?.players.some(p => 
                     `${p.firstName} ${p.lastName}`.toLowerCase().includes(query)
-                );
+                ) || false;
                 
                 const leagueMatch = pairing.team1.league.toLowerCase().includes(query) || 
-                                  pairing.team2.league.toLowerCase().includes(query);
+                                  (pairing.team2?.league.toLowerCase().includes(query) || false);
 
                 return team1Match || team2Match || team1PlayersMatch || team2PlayersMatch || leagueMatch;
             });
@@ -129,8 +208,53 @@ const AdminController: React.FC = () => {
             <div className="bg-white/10 backdrop-blur-sm rounded-2xl shadow-2xl p-4 md:p-6 lg:p-8 border border-white/20">
                 {/* Header */}
                 <div className="mb-6">
-                    <h2 className="text-3xl font-bold text-white mb-2">Admin Controller</h2>
-                    <p className="text-white/70">Manage players and matches</p>
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <div>
+                            <h2 className="text-3xl font-bold text-white mb-2">Admin Controller</h2>
+                            <p className="text-white/70">Manage players and matches</p>
+                        </div>
+                        {activeTab === 'matches' && (
+                            <button
+                                onClick={generateLeagueTable}
+                                disabled={generating}
+                                className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white font-semibold rounded-lg shadow-lg shadow-purple-500/50 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:scale-105 disabled:hover:scale-100 flex items-center space-x-2"
+                            >
+                                {generating ? (
+                                    <>
+                                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                        <span>Generating...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                        <span>Generate League Table</span>
+                                    </>
+                                )}
+                            </button>
+                        )}
+                    </div>
+                    {generateMessage && (
+                        <div className={`mt-4 p-4 rounded-lg ${
+                            generateMessage.type === 'success' 
+                                ? 'bg-green-500/20 border border-green-500/50 text-green-200' 
+                                : 'bg-red-500/20 border border-red-500/50 text-red-200'
+                        }`}>
+                            <div className="flex items-center space-x-2">
+                                {generateMessage.type === 'success' ? (
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                ) : (
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                )}
+                                <span>{generateMessage.text}</span>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Tabs */}
@@ -387,6 +511,17 @@ const AdminController: React.FC = () => {
                 {/* Matches Tab Content */}
                 {activeTab === 'matches' && (
                     <>
+                        <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                            <div className="flex items-start space-x-2">
+                                <svg className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <div className="text-sm text-white/80">
+                                    <p className="font-semibold text-white mb-1">Knockout Tournament Format</p>
+                                    <p>Each team plays only one match per stage. Winners advance to the next stage until a champion is determined. Matches use only fully registered players with complete registration data.</p>
+                                </div>
+                            </div>
+                        </div>
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
                             <button
                                 onClick={fetchPairings}
@@ -458,75 +593,99 @@ const AdminController: React.FC = () => {
                                                 <span className="text-sm text-white/60">{round.matches.length} {round.matches.length === 1 ? 'match' : 'matches'}</span>
                                             </div>
                                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                                {round.matches.map((pairing, index) => (
-                                                    <div
-                                                        key={`${round.round}-${pairing.team1.club}-${pairing.team2.club}-${index}`}
-                                                        className="bg-white/5 rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-colors duration-150"
-                                                    >
-                                                        {/* Match Header */}
-                                                        <div className="text-center mb-4 pb-4 border-b border-white/10">
-                                                            <div className="flex items-center justify-center space-x-2 mb-2">
-                                                                <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                                                </svg>
-                                                                <span className="text-xs font-semibold text-white/60 uppercase tracking-wider">Match</span>
+                                                {round.matches.map((pairing, index) => {
+                                                    const isBye = pairing.isBye || !pairing.team2 || pairing.team2.club === 'Bye';
+                                                    return (
+                                                        <div
+                                                            key={pairing.matchId || `${round.round}-${pairing.team1.club}-${pairing.team2?.club || 'bye'}-${index}`}
+                                                            className={`bg-white/5 rounded-xl p-6 border transition-colors duration-150 ${
+                                                                isBye 
+                                                                    ? 'border-yellow-500/30 hover:bg-white/10' 
+                                                                    : 'border-white/10 hover:bg-white/10'
+                                                            }`}
+                                                        >
+                                                            {/* Match Header */}
+                                                            <div className="text-center mb-4 pb-4 border-b border-white/10">
+                                                                <div className="flex items-center justify-center space-x-2 mb-2">
+                                                                    <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                                    </svg>
+                                                                    <span className="text-xs font-semibold text-white/60 uppercase tracking-wider">
+                                                                        {isBye ? 'Bye' : 'Match'}
+                                                                    </span>
+                                                                </div>
+                                                                {round.round < filteredRounds.length && (
+                                                                    <p className="text-xs text-green-400/80 mt-1">
+                                                                        Winner advances to {filteredRounds[round.round]?.matchday || 'next stage'}
+                                                                    </p>
+                                                                )}
                                                             </div>
-                                                        </div>
 
-                                                        {/* Team 1 */}
-                                                        <div className="mb-4">
-                                                            <div className="flex items-center justify-between mb-2">
-                                                                <h3 className="text-lg font-bold text-white">{pairing.team1.club}</h3>
-                                                                <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-500/20 text-blue-200 border border-blue-500/30">
-                                                                    {pairing.team1.league}
-                                                                </span>
-                                                            </div>
-                                                            <div className="space-y-1">
-                                                                {pairing.team1.players.map((player) => (
-                                                                    <div key={player.id} className="text-sm text-white/80 flex items-center">
-                                                                        <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center mr-2 flex-shrink-0">
-                                                                            <span className="text-white font-semibold text-xs">
-                                                                                {player.firstName[0]}{player.lastName[0]}
-                                                                            </span>
+                                                            {/* Team 1 */}
+                                                            <div className="mb-4">
+                                                                <div className="flex items-center justify-between mb-2">
+                                                                    <h3 className="text-lg font-bold text-white">{pairing.team1.club}</h3>
+                                                                    <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-500/20 text-blue-200 border border-blue-500/30">
+                                                                        {pairing.team1.league}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="space-y-1">
+                                                                    {pairing.team1.players.map((player) => (
+                                                                        <div key={player.id} className="text-sm text-white/80 flex items-center">
+                                                                            <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center mr-2 flex-shrink-0">
+                                                                                <span className="text-white font-semibold text-xs">
+                                                                                    {player.firstName[0]}{player.lastName[0]}
+                                                                                </span>
+                                                                            </div>
+                                                                            <span className="truncate">{player.firstName} {player.lastName}</span>
                                                                         </div>
-                                                                        <span className="truncate">{player.firstName} {player.lastName}</span>
-                                                                    </div>
-                                                                ))}
+                                                                    ))}
+                                                                </div>
                                                             </div>
-                                                        </div>
 
-                                                        {/* VS Divider */}
-                                                        <div className="flex items-center my-4">
-                                                            <div className="flex-1 border-t border-white/20"></div>
-                                                            <div className="px-3">
-                                                                <span className="text-white/60 font-bold text-sm">VS</span>
-                                                            </div>
-                                                            <div className="flex-1 border-t border-white/20"></div>
-                                                        </div>
-
-                                                        {/* Team 2 */}
-                                                        <div>
-                                                            <div className="flex items-center justify-between mb-2">
-                                                                <h3 className="text-lg font-bold text-white">{pairing.team2.club}</h3>
-                                                                <span className="px-2 py-1 text-xs font-semibold rounded-full bg-purple-500/20 text-purple-200 border border-purple-500/30">
-                                                                    {pairing.team2.league}
-                                                                </span>
-                                                            </div>
-                                                            <div className="space-y-1">
-                                                                {pairing.team2.players.map((player) => (
-                                                                    <div key={player.id} className="text-sm text-white/80 flex items-center">
-                                                                        <div className="w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center mr-2 flex-shrink-0">
-                                                                            <span className="text-white font-semibold text-xs">
-                                                                                {player.firstName[0]}{player.lastName[0]}
-                                                                            </span>
+                                                            {/* VS Divider or Bye Message */}
+                                                            {isBye ? (
+                                                                <div className="flex items-center justify-center my-4 py-2 bg-yellow-500/10 rounded-lg border border-yellow-500/30">
+                                                                    <span className="text-yellow-300 font-semibold text-sm">Automatic Advance</span>
+                                                                </div>
+                                                            ) : (
+                                                                <>
+                                                                    <div className="flex items-center my-4">
+                                                                        <div className="flex-1 border-t border-white/20"></div>
+                                                                        <div className="px-3">
+                                                                            <span className="text-white/60 font-bold text-sm">VS</span>
                                                                         </div>
-                                                                        <span className="truncate">{player.firstName} {player.lastName}</span>
+                                                                        <div className="flex-1 border-t border-white/20"></div>
                                                                     </div>
-                                                                ))}
-                                                            </div>
+
+                                                                    {/* Team 2 */}
+                                                                    {pairing.team2 && (
+                                                                        <div>
+                                                                            <div className="flex items-center justify-between mb-2">
+                                                                                <h3 className="text-lg font-bold text-white">{pairing.team2.club}</h3>
+                                                                                <span className="px-2 py-1 text-xs font-semibold rounded-full bg-purple-500/20 text-purple-200 border border-purple-500/30">
+                                                                                    {pairing.team2.league}
+                                                                                </span>
+                                                                            </div>
+                                                                            <div className="space-y-1">
+                                                                                {pairing.team2.players.map((player) => (
+                                                                                    <div key={player.id} className="text-sm text-white/80 flex items-center">
+                                                                                        <div className="w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center mr-2 flex-shrink-0">
+                                                                                            <span className="text-white font-semibold text-xs">
+                                                                                                {player.firstName[0]}{player.lastName[0]}
+                                                                                            </span>
+                                                                                        </div>
+                                                                                        <span className="truncate">{player.firstName} {player.lastName}</span>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </>
+                                                            )}
                                                         </div>
-                                                    </div>
-                                                ))}
+                                                    );
+                                                })}
                                             </div>
                                         </div>
                                     ))}

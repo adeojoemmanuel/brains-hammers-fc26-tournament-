@@ -16,7 +16,9 @@ interface Team {
 
 interface Pairing {
     team1: Team;
-    team2: Team;
+    team2: Team | null;
+    matchId?: string;
+    isBye?: boolean;
 }
 
 interface Round {
@@ -47,7 +49,7 @@ const TeamPairings: React.FC = () => {
         fetchPairings();
     }, [fetchPairings]);
 
-    // Memoize filtered rounds for performance
+    // Filter matches based on search query
     const filteredRounds = useMemo(() => {
         if (!searchQuery.trim()) {
             return rounds;
@@ -56,21 +58,18 @@ const TeamPairings: React.FC = () => {
         const query = searchQuery.toLowerCase().trim();
         return rounds.map(round => {
             const filteredMatches = round.matches.filter(pairing => {
-                // Search by team/club name
                 const team1Match = pairing.team1.club.toLowerCase().includes(query);
-                const team2Match = pairing.team2.club.toLowerCase().includes(query);
+                const team2Match = pairing.team2?.club.toLowerCase().includes(query) || false;
                 
-                // Search by player name
                 const team1PlayersMatch = pairing.team1.players.some(p => 
                     `${p.firstName} ${p.lastName}`.toLowerCase().includes(query)
                 );
-                const team2PlayersMatch = pairing.team2.players.some(p => 
+                const team2PlayersMatch = pairing.team2?.players.some(p => 
                     `${p.firstName} ${p.lastName}`.toLowerCase().includes(query)
-                );
+                ) || false;
                 
-                // Search by league type
                 const leagueMatch = pairing.team1.league.toLowerCase().includes(query) || 
-                                  pairing.team2.league.toLowerCase().includes(query);
+                                  (pairing.team2?.league.toLowerCase().includes(query) || false);
 
                 return team1Match || team2Match || team1PlayersMatch || team2PlayersMatch || leagueMatch;
             });
@@ -82,7 +81,6 @@ const TeamPairings: React.FC = () => {
         }).filter(round => round.matches.length > 0);
     }, [searchQuery, rounds]);
 
-    // Memoize total matches count
     const totalMatches = useMemo(() => {
         return filteredRounds.reduce((sum, round) => sum + round.matches.length, 0);
     }, [filteredRounds]);
@@ -91,11 +89,27 @@ const TeamPairings: React.FC = () => {
         <div className="max-w-7xl mx-auto w-full" style={{ contain: 'layout style' }}>
             <div className="bg-white/10 rounded-2xl shadow-2xl p-6 md:p-8 border border-white/20" style={{ willChange: 'auto', transform: 'translateZ(0)' }}>
                 {/* Header */}
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
-                    <div>
-                        <h2 className="text-3xl font-bold text-white mb-2">Team Pairings</h2>
-                        <p className="text-white/70">View matchups between teams with registered players only</p>
+                <div className="mb-6">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <div>
+                            <h2 className="text-3xl font-bold text-white mb-2">Team Pairings</h2>
+                            <p className="text-white/70">View matchups between teams with registered players only</p>
+                        </div>
                     </div>
+                </div>
+
+                <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                    <div className="flex items-start space-x-2">
+                        <svg className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div className="text-sm text-white/80">
+                            <p className="font-semibold text-white mb-1">Knockout Tournament Format</p>
+                            <p>Each team plays only one match per stage. Winners advance to the next stage until a champion is determined. Matches use only fully registered players with complete registration data.</p>
+                        </div>
+                    </div>
+                </div>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
                     <button
                         onClick={fetchPairings}
                         className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg text-white font-medium transition-colors duration-150 mt-4 sm:mt-0"
@@ -122,6 +136,16 @@ const TeamPairings: React.FC = () => {
                             placeholder="Search by team name, player name, or league type..."
                             className="w-full pl-10 pr-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 backdrop-blur-sm"
                         />
+                        {searchQuery && (
+                            <button
+                                onClick={() => setSearchQuery('')}
+                                className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                            >
+                                <svg className="w-5 h-5 text-white/50 hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        )}
                     </div>
                     {searchQuery && (
                         <p className="mt-2 text-sm text-white/70">
@@ -157,101 +181,122 @@ const TeamPairings: React.FC = () => {
                         )}
                     </div>
                 ) : (
-                    <div className="space-y-8" style={{ contain: 'layout style' }}>
-                        {filteredRounds.map((round) => (
-                            <div key={round.round} className="space-y-4" style={{ contain: 'layout style' }}>
-                                <div className="flex items-center justify-between border-b border-white/20 pb-3">
-                                    <h3 className="text-xl font-bold text-white">{round.matchday}</h3>
-                                    <span className="text-sm text-white/60">{round.matches.length} {round.matches.length === 1 ? 'match' : 'matches'}</span>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" style={{ contain: 'layout style', transform: 'translateZ(0)' }}>
-                                    {round.matches.map((pairing, index) => (
-                            <div
-                                key={`${round.round}-${pairing.team1.club}-${pairing.team2.club}-${index}`}
-                                className="bg-white/5 rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-colors duration-150"
-                                style={{ 
-                                    contain: 'layout style paint', 
-                                    willChange: 'auto',
-                                    transform: 'translateZ(0)',
-                                    backfaceVisibility: 'hidden'
-                                }}
-                            >
-                                {/* Match Header */}
-                                <div className="text-center mb-4 pb-4 border-b border-white/10">
-                                    <div className="flex items-center justify-center space-x-2 mb-2">
-                                        <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                        </svg>
-                                        <span className="text-xs font-semibold text-white/60 uppercase tracking-wider">Match</span>
+                    <>
+                        <div className="space-y-8">
+                            {filteredRounds.map((round) => (
+                                <div key={round.round} className="space-y-4">
+                                    <div className="flex items-center justify-between border-b border-white/20 pb-3">
+                                        <h3 className="text-xl font-bold text-white">{round.matchday}</h3>
+                                        <span className="text-sm text-white/60">{round.matches.length} {round.matches.length === 1 ? 'match' : 'matches'}</span>
                                     </div>
-                                </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                        {round.matches.map((pairing, index) => {
+                                            const isBye = pairing.isBye || !pairing.team2 || pairing.team2.club === 'Bye';
+                                            return (
+                                                <div
+                                                    key={pairing.matchId || `${round.round}-${pairing.team1.club}-${pairing.team2?.club || 'bye'}-${index}`}
+                                                    className={`bg-white/5 rounded-xl p-6 border transition-colors duration-150 ${
+                                                        isBye 
+                                                            ? 'border-yellow-500/30 hover:bg-white/10' 
+                                                            : 'border-white/10 hover:bg-white/10'
+                                                    }`}
+                                                >
+                                                    {/* Match Header */}
+                                                    <div className="text-center mb-4 pb-4 border-b border-white/10">
+                                                        <div className="flex items-center justify-center space-x-2 mb-2">
+                                                            <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                            </svg>
+                                                            <span className="text-xs font-semibold text-white/60 uppercase tracking-wider">
+                                                                {isBye ? 'Bye' : 'Match'}
+                                                            </span>
+                                                        </div>
+                                                        {round.round < filteredRounds.length && (
+                                                            <p className="text-xs text-green-400/80 mt-1">
+                                                                Winner advances to {filteredRounds[round.round]?.matchday || 'next stage'}
+                                                            </p>
+                                                        )}
+                                                    </div>
 
-                                {/* Team 1 */}
-                                <div className="mb-4">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <h3 className="text-lg font-bold text-white">{pairing.team1.club}</h3>
-                                        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-500/20 text-blue-200 border border-blue-500/30">
-                                            {pairing.team1.league}
-                                        </span>
-                                    </div>
-                                    <div className="space-y-1">
-                                        {pairing.team1.players.map((player) => (
-                                            <div key={player.id} className="text-sm text-white/80 flex items-center" style={{ contain: 'layout' }}>
-                                                <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center mr-2 flex-shrink-0" style={{ contain: 'strict' }}>
-                                                    <span className="text-white font-semibold text-xs">
-                                                        {player.firstName[0]}{player.lastName[0]}
-                                                    </span>
+                                                    {/* Team 1 */}
+                                                    <div className="mb-4">
+                                                        <div className="flex items-center justify-between mb-2">
+                                                            <h3 className="text-lg font-bold text-white">{pairing.team1.club}</h3>
+                                                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-500/20 text-blue-200 border border-blue-500/30">
+                                                                {pairing.team1.league}
+                                                            </span>
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            {pairing.team1.players.map((player) => (
+                                                                <div key={player.id} className="text-sm text-white/80 flex items-center">
+                                                                    <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center mr-2 flex-shrink-0">
+                                                                        <span className="text-white font-semibold text-xs">
+                                                                            {player.firstName[0]}{player.lastName[0]}
+                                                                        </span>
+                                                                    </div>
+                                                                    <span className="truncate">{player.firstName} {player.lastName}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* VS Divider or Bye Message */}
+                                                    {isBye ? (
+                                                        <div className="flex items-center justify-center my-4 py-2 bg-yellow-500/10 rounded-lg border border-yellow-500/30">
+                                                            <span className="text-yellow-300 font-semibold text-sm">Automatic Advance</span>
+                                                        </div>
+                                                    ) : (
+                                                        <>
+                                                            <div className="flex items-center my-4">
+                                                                <div className="flex-1 border-t border-white/20"></div>
+                                                                <div className="px-3">
+                                                                    <span className="text-white/60 font-bold text-sm">VS</span>
+                                                                </div>
+                                                                <div className="flex-1 border-t border-white/20"></div>
+                                                            </div>
+
+                                                            {/* Team 2 */}
+                                                            {pairing.team2 && (
+                                                                <div>
+                                                                    <div className="flex items-center justify-between mb-2">
+                                                                        <h3 className="text-lg font-bold text-white">{pairing.team2.club}</h3>
+                                                                        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-purple-500/20 text-purple-200 border border-purple-500/30">
+                                                                            {pairing.team2.league}
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="space-y-1">
+                                                                        {pairing.team2.players.map((player) => (
+                                                                            <div key={player.id} className="text-sm text-white/80 flex items-center">
+                                                                                <div className="w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center mr-2 flex-shrink-0">
+                                                                                    <span className="text-white font-semibold text-xs">
+                                                                                        {player.firstName[0]}{player.lastName[0]}
+                                                                                    </span>
+                                                                                </div>
+                                                                                <span className="truncate">{player.firstName} {player.lastName}</span>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    )}
                                                 </div>
-                                                <span className="truncate">{player.firstName} {player.lastName}</span>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 </div>
+                            ))}
+                        </div>
 
-                                {/* VS Divider */}
-                                <div className="flex items-center my-4">
-                                    <div className="flex-1 border-t border-white/20"></div>
-                                    <div className="px-3">
-                                        <span className="text-white/60 font-bold text-sm">VS</span>
-                                    </div>
-                                    <div className="flex-1 border-t border-white/20"></div>
-                                </div>
-
-                                {/* Team 2 */}
-                                <div>
-                                    <div className="flex items-center justify-between mb-2">
-                                        <h3 className="text-lg font-bold text-white">{pairing.team2.club}</h3>
-                                        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-purple-500/20 text-purple-200 border border-purple-500/30">
-                                            {pairing.team2.league}
-                                        </span>
-                                    </div>
-                                    <div className="space-y-1">
-                                        {pairing.team2.players.map((player) => (
-                                            <div key={player.id} className="text-sm text-white/80 flex items-center" style={{ contain: 'layout' }}>
-                                                <div className="w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center mr-2 flex-shrink-0" style={{ contain: 'strict' }}>
-                                                    <span className="text-white font-semibold text-xs">
-                                                        {player.firstName[0]}{player.lastName[0]}
-                                                    </span>
-                                                </div>
-                                                <span className="truncate">{player.firstName} {player.lastName}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                                    </div>
-                                    ))}
-                                </div>
+                        {/* Total Count */}
+                        {!loading && filteredRounds.length > 0 && (
+                            <div className="mt-6 text-center text-sm text-white/70">
+                                Showing {totalMatches} matches across {filteredRounds.length} {filteredRounds.length === 1 ? 'matchday' : 'matchdays'}
                             </div>
-                        ))}
-                    </div>
+                        )}
+                    </>
                 )}
 
-                {/* Total Count */}
-                {!loading && filteredRounds.length > 0 && (
-                    <div className="mt-6 text-center text-sm text-white/70">
-                        Showing {totalMatches} matches across {filteredRounds.length} {filteredRounds.length === 1 ? 'matchday' : 'matchdays'}
-                    </div>
-                )}
             </div>
         </div>
     );
