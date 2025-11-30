@@ -80,3 +80,50 @@ select {
 select:disabled {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23999999' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
 }
+
+/* Performance optimizations for scrolling */
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Optimize table rendering */
+table {
+  contain: layout style paint;
+}
+
+/* Optimize card rendering during scroll */
+.bg-white\/5,
+.bg-white\/10 {
+  contain: layout style paint;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* Reduce repaints during scroll */
+body {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* Optimize grid layouts for smooth scrolling */
+.grid {
+  contain: layout style;
+  transform: translateZ(0);
+}
+
+/* Optimize rounded containers */
+.rounded-xl,
+.rounded-2xl {
+  contain: layout style paint;
+}
+
+/* Optimize flex containers during scroll */
+.flex {
+  contain: layout;
+}
+
+/* Prevent layout shifts during scroll */
+.space-y-8 > * + * {
+  contain: layout style;
+}

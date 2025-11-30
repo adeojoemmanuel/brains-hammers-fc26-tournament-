@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 
 interface Player {
     id: number;
@@ -20,7 +20,7 @@ const PlayerTable: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
 
-    const fetchPlayers = async () => {
+    const fetchPlayers = useCallback(async () => {
         setLoading(true);
         try {
             const response = await fetch(`http://localhost:3000/api/players?page=${page}&limit=${limit}`);
@@ -32,27 +32,29 @@ const PlayerTable: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [page, limit]);
 
     useEffect(() => {
         fetchPlayers();
-    }, [page, limit]);
+    }, [fetchPlayers]);
 
-    // Filter players based on search query
-    const filteredPlayers = players.filter((player) => {
+    // Filter players based on search query - memoized for performance
+    const filteredPlayers = useMemo(() => {
         const query = searchQuery.toLowerCase().trim();
-        if (!query) return true;
+        if (!query) return players;
         
-        const fullName = `${player.firstName} ${player.lastName}`.toLowerCase();
-        const email = player.email.toLowerCase();
-        const address = player.address.toLowerCase();
-        
-        return fullName.includes(query) || email.includes(query) || address.includes(query);
-    });
+        return players.filter((player) => {
+            const fullName = `${player.firstName} ${player.lastName}`.toLowerCase();
+            const email = player.email.toLowerCase();
+            const address = player.address.toLowerCase();
+            
+            return fullName.includes(query) || email.includes(query) || address.includes(query);
+        });
+    }, [players, searchQuery]);
 
     return (
         <div className="max-w-7xl mx-auto w-full overflow-hidden">
-            <div className="bg-white/10 backdrop-blur-xl rounded-2xl shadow-2xl p-4 md:p-6 lg:p-8 border border-white/20">
+            <div className="bg-white/10 backdrop-blur-sm rounded-2xl shadow-2xl p-4 md:p-6 lg:p-8 border border-white/20" style={{ willChange: 'auto' }}>
                 {/* Header */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
                     <div>
@@ -143,8 +145,8 @@ const PlayerTable: React.FC = () => {
                 ) : (
                     <>
                         {/* Table */}
-                        <div className="rounded-lg border border-white/10 overflow-hidden">
-                            <table className="w-full table-fixed divide-y divide-white/10">
+                        <div className="rounded-lg border border-white/10 overflow-hidden" style={{ contain: 'layout style paint' }}>
+                            <table className="w-full table-fixed divide-y divide-white/10" style={{ willChange: 'auto' }}>
                                     <thead className="bg-white/5">
                                         <tr>
                                             <th className="w-[18%] px-3 py-4 text-left text-xs font-semibold text-white/90 uppercase tracking-wider">
@@ -171,11 +173,11 @@ const PlayerTable: React.FC = () => {
                                         </tr>
                                     </thead>
                                     <tbody className="bg-white/5 divide-y divide-white/10">
-                                        {filteredPlayers.map((player, index) => (
+                                        {filteredPlayers.map((player) => (
                                             <tr
                                                 key={player.id}
                                                 className="hover:bg-white/10 transition-colors duration-150"
-                                                style={{ animationDelay: `${index * 50}ms` }}
+                                                style={{ contain: 'layout style' }}
                                             >
                                                 <td className="px-3 py-4">
                                                     <div className="flex items-center min-w-0">

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 
 interface Player {
     id: number;
@@ -27,36 +27,34 @@ interface Round {
 
 const TeamPairings: React.FC = () => {
     const [rounds, setRounds] = useState<Round[]>([]);
-    const [filteredRounds, setFilteredRounds] = useState<Round[]>([]);
     const [loading, setLoading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
 
-    const fetchPairings = async () => {
+    const fetchPairings = useCallback(async () => {
         setLoading(true);
         try {
             const response = await fetch('http://localhost:3000/api/team-pairings');
             const data = await response.json();
             setRounds(data.rounds || []);
-            setFilteredRounds(data.rounds || []);
         } catch (error) {
             console.error('Error fetching team pairings:', error);
         } finally {
             setLoading(false);
         }
-    };
-
-    useEffect(() => {
-        fetchPairings();
     }, []);
 
     useEffect(() => {
+        fetchPairings();
+    }, [fetchPairings]);
+
+    // Memoize filtered rounds for performance
+    const filteredRounds = useMemo(() => {
         if (!searchQuery.trim()) {
-            setFilteredRounds(rounds);
-            return;
+            return rounds;
         }
 
         const query = searchQuery.toLowerCase().trim();
-        const filtered = rounds.map(round => {
+        return rounds.map(round => {
             const filteredMatches = round.matches.filter(pairing => {
                 // Search by team/club name
                 const team1Match = pairing.team1.club.toLowerCase().includes(query);
@@ -82,13 +80,16 @@ const TeamPairings: React.FC = () => {
                 matches: filteredMatches
             };
         }).filter(round => round.matches.length > 0);
-
-        setFilteredRounds(filtered);
     }, [searchQuery, rounds]);
 
+    // Memoize total matches count
+    const totalMatches = useMemo(() => {
+        return filteredRounds.reduce((sum, round) => sum + round.matches.length, 0);
+    }, [filteredRounds]);
+
     return (
-        <div className="max-w-7xl mx-auto w-full">
-            <div className="bg-white/10 backdrop-blur-xl rounded-2xl shadow-2xl p-6 md:p-8 border border-white/20">
+        <div className="max-w-7xl mx-auto w-full" style={{ contain: 'layout style' }}>
+            <div className="bg-white/10 rounded-2xl shadow-2xl p-6 md:p-8 border border-white/20" style={{ willChange: 'auto', transform: 'translateZ(0)' }}>
                 {/* Header */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
                     <div>
@@ -97,7 +98,7 @@ const TeamPairings: React.FC = () => {
                     </div>
                     <button
                         onClick={fetchPairings}
-                        className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg text-white font-medium transition-all duration-200 backdrop-blur-sm hover:scale-105 mt-4 sm:mt-0"
+                        className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg text-white font-medium transition-colors duration-150 mt-4 sm:mt-0"
                     >
                         <svg className="w-5 h-5 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -124,7 +125,7 @@ const TeamPairings: React.FC = () => {
                     </div>
                     {searchQuery && (
                         <p className="mt-2 text-sm text-white/70">
-                            Found {filteredRounds.reduce((sum, round) => sum + round.matches.length, 0)} {filteredRounds.reduce((sum, round) => sum + round.matches.length, 0) === 1 ? 'match' : 'matches'} across {filteredRounds.length} {filteredRounds.length === 1 ? 'matchday' : 'matchdays'}
+                            Found {totalMatches} {totalMatches === 1 ? 'match' : 'matches'} across {filteredRounds.length} {filteredRounds.length === 1 ? 'matchday' : 'matchdays'}
                         </p>
                     )}
                 </div>
@@ -156,19 +157,24 @@ const TeamPairings: React.FC = () => {
                         )}
                     </div>
                 ) : (
-                    <div className="space-y-8">
+                    <div className="space-y-8" style={{ contain: 'layout style' }}>
                         {filteredRounds.map((round) => (
-                            <div key={round.round} className="space-y-4">
+                            <div key={round.round} className="space-y-4" style={{ contain: 'layout style' }}>
                                 <div className="flex items-center justify-between border-b border-white/20 pb-3">
                                     <h3 className="text-xl font-bold text-white">{round.matchday}</h3>
                                     <span className="text-sm text-white/60">{round.matches.length} {round.matches.length === 1 ? 'match' : 'matches'}</span>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" style={{ contain: 'layout style', transform: 'translateZ(0)' }}>
                                     {round.matches.map((pairing, index) => (
                             <div
                                 key={`${round.round}-${pairing.team1.club}-${pairing.team2.club}-${index}`}
-                                className="bg-white/5 rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-all duration-200 hover:scale-105"
-                                style={{ animationDelay: `${index * 50}ms` }}
+                                className="bg-white/5 rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-colors duration-150"
+                                style={{ 
+                                    contain: 'layout style paint', 
+                                    willChange: 'auto',
+                                    transform: 'translateZ(0)',
+                                    backfaceVisibility: 'hidden'
+                                }}
                             >
                                 {/* Match Header */}
                                 <div className="text-center mb-4 pb-4 border-b border-white/10">
@@ -190,13 +196,13 @@ const TeamPairings: React.FC = () => {
                                     </div>
                                     <div className="space-y-1">
                                         {pairing.team1.players.map((player) => (
-                                            <div key={player.id} className="text-sm text-white/80 flex items-center">
-                                                <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mr-2 flex-shrink-0">
+                                            <div key={player.id} className="text-sm text-white/80 flex items-center" style={{ contain: 'layout' }}>
+                                                <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center mr-2 flex-shrink-0" style={{ contain: 'strict' }}>
                                                     <span className="text-white font-semibold text-xs">
                                                         {player.firstName[0]}{player.lastName[0]}
                                                     </span>
                                                 </div>
-                                                <span>{player.firstName} {player.lastName}</span>
+                                                <span className="truncate">{player.firstName} {player.lastName}</span>
                                             </div>
                                         ))}
                                     </div>
@@ -221,13 +227,13 @@ const TeamPairings: React.FC = () => {
                                     </div>
                                     <div className="space-y-1">
                                         {pairing.team2.players.map((player) => (
-                                            <div key={player.id} className="text-sm text-white/80 flex items-center">
-                                                <div className="w-6 h-6 bg-gradient-to-br from-purple-500 to-pink-600 rounded-full flex items-center justify-center mr-2 flex-shrink-0">
+                                            <div key={player.id} className="text-sm text-white/80 flex items-center" style={{ contain: 'layout' }}>
+                                                <div className="w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center mr-2 flex-shrink-0" style={{ contain: 'strict' }}>
                                                     <span className="text-white font-semibold text-xs">
                                                         {player.firstName[0]}{player.lastName[0]}
                                                     </span>
                                                 </div>
-                                                <span>{player.firstName} {player.lastName}</span>
+                                                <span className="truncate">{player.firstName} {player.lastName}</span>
                                             </div>
                                         ))}
                                     </div>
@@ -243,7 +249,7 @@ const TeamPairings: React.FC = () => {
                 {/* Total Count */}
                 {!loading && filteredRounds.length > 0 && (
                     <div className="mt-6 text-center text-sm text-white/70">
-                        Showing {filteredRounds.reduce((sum, round) => sum + round.matches.length, 0)} matches across {filteredRounds.length} {filteredRounds.length === 1 ? 'matchday' : 'matchdays'}
+                        Showing {totalMatches} matches across {filteredRounds.length} {filteredRounds.length === 1 ? 'matchday' : 'matchdays'}
                     </div>
                 )}
             </div>

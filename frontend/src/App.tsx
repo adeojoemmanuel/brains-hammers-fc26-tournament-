@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, NavLink, useLocation } from 're
 import RegistrationForm from './components/RegistrationForm';
 import PlayerTable from './components/PlayerTable';
 import TeamPairings from './components/TeamPairings';
+import AdminController from './components/AdminController';
 
 function AppContent() {
   const location = useLocation();
@@ -58,6 +59,18 @@ function AppContent() {
               >
                 Team Pairings
               </NavLink>
+              <NavLink
+                to="/admin-controller"
+                className={({ isActive }) =>
+                  `px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
+                    isActive
+                      ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-purple-500/50'
+                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                  }`
+                }
+              >
+                Admin
+              </NavLink>
             </div>
           </div>
         </div>
@@ -72,6 +85,7 @@ function AppContent() {
             <Route path="/" element={<RegistrationForm />} />
             <Route path="/table" element={<PlayerTable />} />
             <Route path="/pairings" element={<TeamPairings />} />
+            <Route path="/admin-controller" element={<AdminController />} />
           </Routes>
         </div>
       </main>
